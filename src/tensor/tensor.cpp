@@ -163,28 +163,130 @@ void Tensor::debug() const {
     }
 }
 
+// 1-2
 bool Tensor::isContiguous() const {
-    TO_BE_IMPLEMENTED();
+    //TO_BE_IMPLEMENTED();
+    if (_meta.shape.empty() || _meta.shape.size() == 1) {
+        return true;
+    }
+
+    if (_meta.strides.back() != 1) {
+        return false;
+    }
+
+    size_t expected_stride = 1;
+    for (int i = _meta.shape.size() - 2; i >= 0; --i) {
+        expected_stride *= _meta.shape[i + 1];
+        if (_meta.strides[i] != static_cast<ptrdiff_t>(expected_stride)) {
+            return false;
+        }
+    }
+
     return true;
 }
 
+// 1-4
 tensor_t Tensor::permute(const std::vector<size_t> &order) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    //TO_BE_IMPLEMENTED();
+    if (order.size() != this->ndim()) {
+        throw std::invalid_argument("Invalid permute order: size does not match tensor dimensions.");
+    }
+    std::vector<bool> seen(this->ndim(), false);
+    for (size_t dim : order) {
+        if (dim >= this->ndim() || seen[dim]) {
+            throw std::invalid_argument("Invalid permute order: contains duplicates or out of bounds.");
+        }
+        seen[dim] = true;
+    }
+
+    TensorMeta new_meta;
+    new_meta.dtype = this->_meta.dtype;
+    new_meta.shape.resize(this->ndim());
+    new_meta.strides.resize(this->ndim());
+
+    for (size_t i = 0; i < order.size(); ++i) {
+        new_meta.shape[i] = this->_meta.shape[order[i]];
+        new_meta.strides[i] = this->_meta.strides[order[i]];
+    }
+
+    return std::shared_ptr<Tensor>(new Tensor(new_meta, this->_storage, this->_offset));
+    //return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
 }
 
+// 1-3
 tensor_t Tensor::view(const std::vector<size_t> &shape) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    //TO_BE_IMPLEMENTED();
+
+    size_t new_elements = 1;
+
+    for (const auto& dim_size : shape) {
+        new_elements *= dim_size;
+    }
+    if (new_elements != this->numel()) {
+        throw std::runtime_error("View shape does not match the number of elements.");
+    }
+
+    if (!this->isContiguous()) {
+        throw std::runtime_error("View is not supported on non-contiguous tensor. "
+                                 "Use reshape() or contiguous().view() instead.");
+    }
+
+    TensorMeta new_meta;
+    new_meta.dtype = this->_meta.dtype;
+    new_meta.shape = shape;
+
+    new_meta.strides.resize(shape.size());
+    if (!shape.empty()) {
+        new_meta.strides.back() = 1;
+        for (int i = shape.size() - 2; i >= 0; --i) {
+            new_meta.strides[i] = new_meta.strides[i + 1] * shape[i + 1];
+        }
+    }
+
+    return std::shared_ptr<Tensor>(new Tensor(new_meta, this->_storage, this->_offset));
+    //return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
 }
 
+// 1-5
 tensor_t Tensor::slice(size_t dim, size_t start, size_t end) const {
-    TO_BE_IMPLEMENTED();
-    return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
+    //TO_BE_IMPLEMENTED();
+    if (dim >= this->ndim()) {
+        throw std::out_of_range("Dimension out of range for slice.");
+    }
+    if (start >= end || end > this->_meta.shape[dim]) {
+        throw std::out_of_range("Slice indices out of range.");
+    }
+
+    TensorMeta new_meta = this->_meta;
+
+    size_t new_offset = this->_offset + start * this->_meta.strides[dim] * this->elementSize();
+
+    new_meta.shape[dim] = end - start;
+
+
+    return std::shared_ptr<Tensor>(new Tensor(new_meta, this->_storage, new_offset));
+    //return std::shared_ptr<Tensor>(new Tensor(_meta, _storage));
 }
 
+// 1-1
+// 把一块已有的数据（通常在 CPU 主机内存里）拷贝到当前 Tensor 的设备内存里。
 void Tensor::load(const void *src_) {
-    TO_BE_IMPLEMENTED();
+    //TO_BE_IMPLEMENTED();
+    auto& ctx = core::context();
+
+    ctx.setDevice(this->deviceType(), this->deviceId());
+
+    auto& runtime = ctx.runtime();
+    auto api = runtime.api();
+
+    size_t size = this->numel() * this->elementSize();
+
+    api->memcpy_sync(   this->data(), 
+                        src_, 
+                        size, 
+                        LLAISYS_MEMCPY_H2D);
+
+    std::cout << "Data loaded to tensor, size: " << size << " bytes." << std::endl; 
 }
 
 tensor_t Tensor::contiguous() const {
